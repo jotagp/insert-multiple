@@ -1,0 +1,17 @@
+{
+    "name": "jotagp/insert-multiple",
+    "description": "A simple PHP package, to insert multiple records into a MySQL/MariaDB database.",
+    "type": "library",
+    "license": "MIT",
+    "authors": [{
+        "name": "João Gabriel Pereira",
+        "email": "jota.gab.per@gmail.com"
+    }],
+    "autoload": {
+        "psr-4": {
+            "Jotagp\\InsertMultiple\\": "src/"
+        }
+    },
+    "minimum-stability": "stable",
+    "require": {}
+}
