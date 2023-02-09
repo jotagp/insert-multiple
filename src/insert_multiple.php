@@ -7,43 +7,60 @@ namespace jotagp\insert_multiple;
 class insert_multiple {
   
 
-  public $table_properties = []; // array que guarda as propriedades da tabela em questão
-  public $table_name = []; // string que guarda o nome da tabela em questão
-  public $final_array = []; // array de arrays, com todos os registros a serem inseridos
-  public $connection = []; // conecção com o banco
-  public $debug = false; // flag para exibir alguns echos etc
+  public $table_properties = []; // array that holds the table details
+  public $table_name = []; // string that holds the name of the table
+  public $final_array = []; // array of arrays, with all data
+  public $connection = []; // connection with database mysql/mariadb
+  public $debug = false; // flag to debug. insert one record per time
 
 
   // constructor
   public function __construct($connection, $table_name) {
 
 
-    // setando os atributos do objeto
+    // set the object attributes
     $this->connection = $connection;
     $this->table_name = $table_name;
 
-    // buscando no banco pela tabela em questão
+
+    // fetch the table details from the database 
     $selectMetadata = "DESC {$table_name}";
-    $rows = $connection->query($selectMetadata) or die("\nErro ao buscar metadados. ". $connection->errno . " - " . $connection->error);
+    $rows = $connection->query($selectMetadata) or die("\nError: could not fetch metadata. ". $connection->errno . " - " . $connection->error);
     
-    // valida se foram encontrados dados
+    // checks if the data was found
     if ($rows->num_rows > 0) {
 
-      // percorre as tuplas
+      // iterate over the tuples
       foreach ($rows as $row) {
 
-        $column = $row['Field'];
+        // that variable contains the column name 
+        $column_name = $row['Field'];
 
-        if ($row['Key'] == 'PRI') continue;
+        // go to next iteration, if that is a primary key autoinrecemnt (keep database decision)
+        if ($row['Key'] == 'PRI' && $row['Extra'] == 'auto_increment') continue;
 
+        // make array with the table properties
         foreach ($row as $key => $val) {
 
-          $this->table_properties[$column][$key] = $val;
+          // keep in type property, only strings between a and z 
+          if ($key == 'Type') {
+            
+            $val = preg_replace('/[^a-zA-Z]+/', '', $val);
+            
+          }
+
+          $this->table_properties[$column_name][$key] = $val;
 
         }
 
       }
       
+    }
+    else {
+
+      echo "\nCould not fetch metadata";
+      return FALSE;
+
     }
 
   }
@@ -52,50 +69,38 @@ class insert_multiple {
   // function do add new value into insert
   public function push($any) {
     
-    // echo "\npush";
-
-    // global $table_properties;
-    // global $final_array;
-    
-
+    // temporary array to store that data
     $new_any = [];
 
-    // percorrendo as propriedades da tabela
-    foreach ($this->table_properties as $key => $val) {
+    // iterate over the table properties
+    foreach ($this->table_properties as $column_name => $property) {
 
-      // verificando se existe algum atributo informado no parametro, contido na tabela
-      if (isset($any[$key])) {
+      // check if exists at variable any and if is not empty, this iteration column name  
+      if (isset($any[$column_name]) && !empty($any[$column_name])) {
 
-        // se sim
-
-        // verifica se o valor é valido
-        if (strlen($any[$key]) > 0) {
-
-          // se sim
-          $new_any[$key] = addslashes($any[$key]);
-
-        }
-        else {
-
-          //senão
-          $new_any[$key] = $val['Default'];
-
-        }
+        $new_any[$column_name] = addslashes($any[$column_name]);
 
       }
       else {
 
-        //senão
-        $new_any[$key] = $val['Default'];
+        $new_any[$column_name] = $property['Default'];
 
       }
 
-      if (1==1) {true;} // implementar aqui a validação da tipagem, para não concatenar as aspas segamente
+      // concat the quoation marks, if necessary
+      $string_types = ['CHAR', 'VARCHAR', 'TINYTEXT', 'TEXT', 'BLOB', 'MEDIUMTEXT', 'MEDIUMBLOB', 'LONGTEXT', 'LONGBLOB', 'DATE', 'DATETIME', 'TIMESTAMP', 'TIME', 'YEAR'];
+
+      if (in_array(strtoupper($property['Type']), $string_types)) {
+
+        $new_any[$column_name] = "'". $new_any[$column_name] . "'";
+
+      }
 
     }
 
-    // incrementa o array de arrays
-    $this->final_array[] = "'". implode("', '", $new_any) ."'";
+    // increment the final array
+    // $this->final_array[] = "'". implode("', '", $new_any) ."'";
+    $this->final_array[] = implode(", ", $new_any);
     
   }
 
@@ -231,7 +236,7 @@ class insert_multiple {
   // function to set configs
   public function config($any) {
 
-    echo "\nconfig";
+    // echo "\nconfig";
     if (isset($any['debug'])) $this->debug = $any['debug'];
     
   }
@@ -240,7 +245,7 @@ class insert_multiple {
   // destructor
   public function __destruct() {
   
-    echo "\ndestruct";
+    // echo "\ndestruct";
     // echo $this->table_name;
     // var_dump($this->connection);
 

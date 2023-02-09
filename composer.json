@@ -9,7 +9,7 @@
     }],
     "autoload": {
         "psr-4": {
-            "Jotagp\\InsertMultiple\\": "src/"
+            "jotagp\\insert_multiple\\": "src/"
         }
     },
     "minimum-stability": "stable",
