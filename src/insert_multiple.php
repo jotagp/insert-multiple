@@ -108,53 +108,55 @@ class insert_multiple {
   // function to run insert
   public function exec() {
 
-    // A variavel insertSizeLimit armazena o tamanho maximo em bites de uma transação permitida pelo mysql
-    // E subtraimos dela 10%, para uma margem de erro
-    $insertSizeLimit = $this->connection->query("show variables like 'max_allowed_packet'")->fetch_assoc()['Value'];
-    $insertSizeLimit -= ($insertSizeLimit * 0.1);
 
-    // A variavel currentSize armazena o valor em bites de cada tupla
-    $currentSize = 0;
+    // The variable insert_size_limit stores the maximum size in bytes of a transaction allowed by mysql
+    $insert_size_limit = $this->connection->query("show variables like 'max_allowed_packet'")->fetch_assoc()['Value'];
 
-    // A variavel partition será a quantidade de inserts multiplos que acontecerão...
-    // Toda vez que a currentSize estiver próxima do insertSizeLimit, uma nova partição é criada
+    // And we subtract 10% from it, for a margin of error
+    $insert_size_limit -= ($insert_size_limit * 0.1);
+
+    // The variable current_size stores the value in bytes of each tuple
+    $current_size = 0;
+
+    // The Partition variable will be the amount of multiple inserts that will happen
     $partition = 0;
 
-    // Será o array final, com os dados tratados. Cada indice será um valor da variavel partition
+    // It will be the final array, with the processed data. Each index will be a value of the Partition variable
     $inserts = [];
 
     /*
-    PRIMEIRA ETAPA:
-    Dividir o array final_array, em arrays menores, que caibam num insert
+    FIRST STEP:
+    Split the final_array array into smaller arrays that fit in an insert
     */
     foreach ($this->final_array as $index => $array) {
 
-      // Incrementa a currentSize, com os bites da tulpa iterada
-      $currentSize += mb_strlen($array, '8bit');
+      // Increments the current_size, with the bytes of the iterated tulpa
+      $current_size += mb_strlen($array, '8bit');
 
-      // Se a flag debug for verdadeira nos parametros da função, o insert deverá acontecer de uma em uma tupla
-      $currentSize = $this->debug ? 1 : $currentSize;
-      $insertSizeLimit = $this->debug ? 1 : $insertSizeLimit;
+      // If the debug flag is true on the function parameters, the insertion must happen one by one tuple
+      $current_size = $this->debug ? 1 : $current_size;
+      $insert_size_limit = $this->debug ? 1 : $insert_size_limit;
 
-      // Enquanto os currentSize forem menor ou igual ao insertSizeLimit, inserimos a tupla na mesma particao
-      if ($currentSize <= $insertSizeLimit) {
+      // As long as current_size is less than or equal to insert_size_limit, we insert the tuple in the same partition, else, we insert the tuple in a new partition.
+      if ($current_size <= $insert_size_limit) {
 
         $inserts[$partition][$index] = $array;
 
-        // caso o debug seja true, cria uma partição para cada tupla
+        // if debug is true, create a partition for each tuple
         if ($this->debug) {
 
+          // Every time current_size is close to insert_size_limit, a new partition is created
           $partition += 1;
 
         }
 
       }
-      else { // Se não, inserimos a tupla numa nova particao
+      else {
 
         $partition += 1;
 
-        // Inicia novamente o valor da variavel currentSize, com os bites da tupla atual
-        $currentSize = mb_strlen($array, '8bit');
+        // Initializes the value of the variable current_size again, with the bytes of the current tuple
+        $current_size = mb_strlen($array, '8bit');
         $inserts[$partition][$index] = $array;
 
       }
@@ -162,8 +164,8 @@ class insert_multiple {
     }
 
     /*
-    SEGUNDA ETAPA:
-    Concatenar todas as posições dentro da partição, em uma única posição na partição
+    SECOND STEP:
+    Concatenate all positions within the partition, into a single position within the partition
     */
     foreach ($inserts as $index => $insert) {
 
@@ -174,61 +176,41 @@ class insert_multiple {
 
     
     /*
-    ÚLTIMA ETAPA:
-    Inserir os dados
+    LAST STEP:
+    Insert the data
     */
     $this->connection->begin_transaction();
 
-    // try {
 
-      // if (!$this->debug) {
-        
-      //   // echoLog(" ", FALSE);
+    foreach ($inserts as $partition => $values) {
+      
+      
+      $columns = implode(", ", array_keys($this->table_properties));
+      $insert_query = sprintf("INSERT INTO %s (%s) VALUES (%s)", $this->table_name, $columns, $values);
+
+      // if (strstr($insert_query, 'NULL') == TRUE) {
+
+      //   $insert_query = str_replace('\'NULL\'', 'NULL', $insert_query);
 
       // }
 
-      foreach ($inserts as $partition => $values) {
+      try {
 
-        // $id = is_numeric($values['0']) ? 'id,' : '';
-        
-        $columns = implode(", ", array_keys($this->table_properties));
-        $insertQuery = sprintf("INSERT INTO %s (%s) VALUES (%s)", $this->table_name, $columns, $values);
+        $this->connection->query($insert_query) or die($this->connection->error . '' . $insert_query);
 
-        // if (strstr($insertQuery, 'NULL') == TRUE) {
+      }
+      catch (\Exception $e) {
 
-        //   $insertQuery = str_replace('\'NULL\'', 'NULL', $insertQuery);
-
-        // }
-
-        try {
-
-          $this->connection->query($insertQuery) or die($this->connection->error . '' . $insertQuery);
-
-        }
-        catch (\Exception $e) {
-
-          // echoLog("\nErro ao tentar gravar Tags: {$e->getMessage()}\n");
-          exit;
-
-        }
-
-        if (!$this->debug) {
-
-          // echoLog("P", FALSE);
-
-        }
+        die("\nError");
 
       }
 
-      $this->connection->commit();
 
-    // }
-    // catch (mysqli_sql_exception $exception) {
+    }
 
-    //   $connection->rollback();
-    //   throw $exception;
 
-    // }
+    $this->connection->commit();
+
     
   }
 
