@@ -11,21 +11,25 @@ class insert_multiple {
   public $table_name = []; // string that holds the name of the table
   public $final_array = []; // array of arrays, with all data
   public $connection = []; // connection with database mysql/mariadb
-  public $debug = false; // flag to debug. insert one record per time
+  public $insert_multiple = true; // flag to insert_multiple. insert one record per time
+  public $string_types = ['CHAR', 'VARCHAR', 'TINYTEXT', 'TEXT', 'BLOB', 'MEDIUMTEXT', 'MEDIUMBLOB', 'LONGTEXT', 'LONGBLOB', 'DATE', 'DATETIME', 'TIMESTAMP', 'TIME', 'YEAR']; // defautl string types
+  public $table_pk_autoincrement = []; // fetch the increment value 
 
 
   // constructor
   public function __construct($connection, $table_name) {
 
-
     // set the object attributes
     $this->connection = $connection;
     $this->table_name = $table_name;
 
+    // get auto_increment
+    $select_increment = "SHOW TABLE STATUS LIKE '{$table_name}'";
+    $this->table_pk_autoincrement = $connection->query($select_increment)->fetch_assoc()['Auto_increment'] -1 ; // because we increment +1 later
 
-    // fetch the table details from the database 
-    $selectMetadata = "DESC {$table_name}";
-    $rows = $connection->query($selectMetadata) or die("\nError: could not fetch metadata. ". $connection->errno . " - " . $connection->error);
+    // fetch the table details from the database
+    $select_metadata = "DESC {$table_name}";
+    $rows = $connection->query($select_metadata) or die("\nError: could not fetch metadata. ". $connection->errno . " - " . $connection->error);
     
     // checks if the data was found
     if ($rows->num_rows > 0) {
@@ -37,16 +41,17 @@ class insert_multiple {
         $column_name = $row['Field'];
 
         // go to next iteration, if that is a primary key autoinrecemnt (keep database decision)
-        if ($row['Key'] == 'PRI' && $row['Extra'] == 'auto_increment') continue;
+        // if ($row['Key'] == 'PRI' && $row['Extra'] == 'auto_increment') continue;
 
         // make array with the table properties
         foreach ($row as $key => $val) {
 
-          // keep in type property, only strings between a and z 
+          // validate column type
           if ($key == 'Type') {
             
+            // keep in type property Type, only characters between a and z. Ex: from: varchar(100) to: varchar 
             $val = preg_replace('/[^a-zA-Z]+/', '', $val);
-            
+                          
           }
 
           $this->table_properties[$column_name][$key] = $val;
@@ -58,8 +63,7 @@ class insert_multiple {
     }
     else {
 
-      echo "\nCould not fetch metadata";
-      return FALSE;
+      die("\nNo metadata found");
 
     }
 
@@ -75,22 +79,32 @@ class insert_multiple {
     // iterate over the table properties
     foreach ($this->table_properties as $column_name => $property) {
 
-      // check if exists at variable any and if is not empty, this iteration column name  
-      if (isset($any[$column_name]) && !empty($any[$column_name])) {
+      // check if exists this column name at variable Any, and if is not empty, this iteration column name  
+      if (isset($any[$column_name]) && strlen($any[$column_name]) > 0) {
 
         $new_any[$column_name] = addslashes($any[$column_name]);
 
       }
       else {
 
-        $new_any[$column_name] = $property['Default'];
+        // check if de property is primary key
+        if ($property['Key'] == 'PRI') {
+        
+          // remove from table properties the pk column, and make de database decision
+          unset($this->table_properties[$column_name]);
+          // echo "\n Entrou"; exit;
+        
+        }
+        else {
+
+          $new_any[$column_name] = strlen($property['Default']) > 0 ? $property['Default'] : 'NULL';
+
+        }
 
       }
 
       // concat the quoation marks, if necessary
-      $string_types = ['CHAR', 'VARCHAR', 'TINYTEXT', 'TEXT', 'BLOB', 'MEDIUMTEXT', 'MEDIUMBLOB', 'LONGTEXT', 'LONGBLOB', 'DATE', 'DATETIME', 'TIMESTAMP', 'TIME', 'YEAR'];
-
-      if (in_array(strtoupper($property['Type']), $string_types)) {
+      if (in_array(strtoupper($property['Type']), $this->string_types) || strstr($property['Type'], 'enum')) {
 
         $new_any[$column_name] = "'". $new_any[$column_name] . "'";
 
@@ -99,7 +113,6 @@ class insert_multiple {
     }
 
     // increment the final array
-    // $this->final_array[] = "'". implode("', '", $new_any) ."'";
     $this->final_array[] = implode(", ", $new_any);
     
   }
@@ -133,17 +146,17 @@ class insert_multiple {
       // Increments the current_size, with the bytes of the iterated tulpa
       $current_size += mb_strlen($array, '8bit');
 
-      // If the debug flag is true on the function parameters, the insertion must happen one by one tuple
-      $current_size = $this->debug ? 1 : $current_size;
-      $insert_size_limit = $this->debug ? 1 : $insert_size_limit;
+      // If the insert_multiple flag is true on the function parameters, the insertion must happen one by one tuple
+      $current_size = $this->insert_multiple ? $current_size : 1;
+      $insert_size_limit = $this->insert_multiple ? $insert_size_limit : 1;
 
       // As long as current_size is less than or equal to insert_size_limit, we insert the tuple in the same partition, else, we insert the tuple in a new partition.
       if ($current_size <= $insert_size_limit) {
 
         $inserts[$partition][$index] = $array;
 
-        // if debug is true, create a partition for each tuple
-        if ($this->debug) {
+        // if insert_multiple is false, create a partition for each tuple
+        if (!$this->insert_multiple) {
 
           // Every time current_size is close to insert_size_limit, a new partition is created
           $partition += 1;
@@ -188,11 +201,12 @@ class insert_multiple {
       $columns = implode(", ", array_keys($this->table_properties));
       $insert_query = sprintf("INSERT INTO %s (%s) VALUES (%s)", $this->table_name, $columns, $values);
 
-      // if (strstr($insert_query, 'NULL') == TRUE) {
+      // fix de NULL values
+      if (strstr($insert_query, 'NULL') == TRUE) {
 
-      //   $insert_query = str_replace('\'NULL\'', 'NULL', $insert_query);
+        $insert_query = str_replace('\'NULL\'', 'NULL', $insert_query);
 
-      // }
+      }
 
       try {
 
@@ -219,10 +233,17 @@ class insert_multiple {
   public function config($any) {
 
     // echo "\nconfig";
-    if (isset($any['debug'])) $this->debug = $any['debug'];
+    if (isset($any['insert_multiple'])) $this->insert_multiple = $any['insert_multiple'];
     
   }
 
+
+  // function than returns de next increment from pk
+  public function pk() {
+
+    return $this->table_pk_autoincrement += 1;
+
+  }
 
   // destructor
   public function __destruct() {
