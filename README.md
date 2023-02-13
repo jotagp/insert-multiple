@@ -1,4 +1,4 @@
-# insert-multiple
+# INSERT-MULTIPLE
 
 ## Sumary
 1. Introduction  
@@ -19,7 +19,49 @@
 This is a simple PHP package to insert multiple data into a MySQL/MariaDB database.  
 
 **1.2 Why**  
-Why sim...  
+This package was created with the aim of reducing data insertion time. To understand the magnitude of the problem, let's assume that we want to go through the items in a list and insert them into a database.  
+```php
+// example with insert tradicional
+foreach ($list as $item) {
+	$insert = "INSERT INTO `table1`(`numbers`, `description`) VALUES ({$item['number']}, {$item['description']});
+	$connection->query($insert) or die ($connection->error);
+}
+```
+The example above works. However, when working with a large volume of data, traditional insertion is not a viable option. This is because it inserts a single record at a time. So, if you have 100,000 records, there will be 100,000 insertions and, consequently, 100,000 trips to the hard disk to persist this data, and this task will take a long time (of course, it depends on the size of your data).
+One "option" is to control the transaction from the database manually, something like:
+```php
+// example cwith insert tradicional and transaction control
+$connection->begin_transaction();
+foreach ($list as $item) {
+	$insert = "INSERT INTO `table1`(`numbers`, `description`) VALUES ({$item['number']}, {$item['description']});
+	$connection->query($insert) or die ($connection->error);
+}
+$connection->commit();
+```
+However, this approach still does not definitively solve our problem, as the time gain is not significant. What to do then? Simple! make a multiple insert:
+```php
+// example with manually insert multiple
+$connection->begin_transaction();
+$insert = "INSERT INTO `table1`(`numbers`, `description`) VALUES ";
+foreach ($list as $item) {
+	$insert .= "({$item['number']}, {$item['description']}) "; // concat new values 
+}
+$insert = str_replace(") (", "), (", $insert); // separe values
+$connection->query($insert) or die ($connection->error);
+$connection->commit();
+```
+However (there's always a however, right?), there is a transaction limit allowed by the bank, and this limit is easily reached when a very extensive query is set up.
+And that, my friends, is where this package comes in. It will partition your values ​​into N Multiple slots, according to your bank's capacity:
+```php
+// example with package
+$insert = new insert_multiple($connection, "table1");
+foreach ($list as $item) {
+	$insert->push($item); // concat new values
+}
+$insert->exec(); // run inserts
+```
+And it's that simple.
+
 
 **1.3 License**  
 This code is licensed under the [MIT license](https://opensource.org/licenses/MIT).  
