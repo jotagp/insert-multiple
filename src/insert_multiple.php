@@ -12,10 +12,15 @@ class insert_multiple {
   public $final_array = []; // array of arrays, with all data
   public $connection = []; // connection with database mysql/mariadb
   public $insert_multiple = true; // flag to insert_multiple. insert one record per time
-  public $update_if_exists = false; // flag to update on duplicate key (like on conflict)
-  public $dont_update_if_new_is_empty = true;
   public $string_types = ['CHAR', 'VARCHAR', 'TINYTEXT', 'TEXT', 'BLOB', 'MEDIUMTEXT', 'MEDIUMBLOB', 'LONGTEXT', 'LONGBLOB', 'DATE', 'DATETIME', 'TIMESTAMP', 'TIME', 'YEAR']; // defautl string types
   public $table_pk_autoincrement = []; // fetch the increment value 
+
+  // update
+  public $update_if_exists = false;
+  public $fields_to_update = [];
+  public $skip_if_new_is_empty = false;
+  public $skip_if_already_exists = false;
+  public $print_query = false;
 
 
   // constructor
@@ -106,7 +111,7 @@ class insert_multiple {
       }
 
       // concat the quoation marks, if necessary
-      if (in_array(strtoupper($property['Type']), $this->string_types) || strstr($property['Type'], 'enum')) {
+      if ((in_array(strtoupper($property['Type']), $this->string_types) || strstr($property['Type'], 'enum')) && strstr($new_any[$column_name], '()') == FALSE ) {
 
         $new_any[$column_name] = "'". $new_any[$column_name] . "'";
 
@@ -122,7 +127,6 @@ class insert_multiple {
 
   // function to run insert
   public function exec() {
-
 
     // The variable insert_size_limit stores the maximum size in bytes of a transaction allowed by mysql
     $insert_size_limit = $this->connection->query("show variables like 'max_allowed_packet'")->fetch_assoc()['Value'];
@@ -146,7 +150,7 @@ class insert_multiple {
     foreach ($this->final_array as $index => $array) {
 
       // Increments the current_size, with the bytes of the iterated tulpa
-      $current_size += 1;// @mb_strlen($array, '8bit');
+      $current_size += mb_strlen($array, '8bit');
 
       // If the insert_multiple flag is true on the function parameters, the insertion must happen one by one tuple
       $current_size = $this->insert_multiple ? $current_size : 1;
@@ -198,32 +202,47 @@ class insert_multiple {
 
 
     foreach ($inserts as $partition => $values) {
-            
+       
       $columns = implode(", ", array_keys($this->table_properties));
       $insert_query = sprintf("INSERT INTO %s (%s) VALUES (%s)", $this->table_name, $columns, $values);
-      
-      // if update_if_exists flag is not false, then is a array of fields to be updated 
-      if ($this->update_if_exists !== FALSE) {
+
+      // control update on duplicate key
+      if ($this->update_if_exists && sizeof($this->fields_to_update) > 0) {
+
 
         $insert_query .= " ON DUPLICATE KEY UPDATE ";
-        
-        foreach ($this->update_if_exists as $field) {
+        $updates = []; // array with update instructions
 
-          if ($this->dont_update_if_new_is_empty == TRUE) {
+        foreach ($this->fields_to_update as $field) {
 
-            $elements[] = "{$field} = IF( VALUES({$field}) NOT LIKE '' OR VALUES({$field}) IS NOT NULL, VALUES({$field}), {$field})";
+          
+          if ($this->skip_if_already_exists) {
+            
+            $updates[] = "{$field} = IF({$field} IS NOT NULL AND TRIM({$field}) NOT LIKE '', {$field}, VALUES({$field}))";
+
+          }
+          elseif ($this->skip_if_new_is_empty) {
+
+            $updates[] = "{$field} = IF(VALUES({$field}) IS NOT NULL AND TRIM(VALUES({$field})) NOT LIKE '', VALUES({$field}), {$field})";
 
           }
           else {
 
-            $elements[] = "{$field} = VALUES({$field})";
+            $updates[] = "{$field} = VALUES({$field})";
 
           }
-          
+
         }
 
-        $insert_query .= implode(", ", $elements);
+        
+        $insert_query .= implode(", ", $updates);
+        
 
+      }
+
+      if ($this->print_query) {
+        echo "\n\n". $insert_query;
+        exit;
       }
 
       // fix de NULL values
@@ -233,19 +252,62 @@ class insert_multiple {
 
       }
 
+      // print 
+      if ($this->print_query) {echo "\n\n\t\t". $insert_query; exit;}
+
       try {
 
-        // echo "\n"; 
-        // var_dump($brokens);
-        // exit;
-        echo "\n". $insert_query;
-        $this->connection->query($insert_query) or die($this->connection->error . '' . $insert_query);
+        $this->connection->query($insert_query);
 
       }
       catch (\Exception $e) {
 
+        // break the multiple inserts into single inserts, 
+
+        echo "\n\n\tHouston, we have a problem: {$e->getMessage()}...\n";
         
-        die("\nError: ". $e->getMessage());
+        if ($this->insert_multiple) {
+
+          // echo "\nCommand: ". $insert_query;
+          $command = explode(" VALUES ", $insert_query);
+          // echo "\nPrefix: ".
+          $command_prefix = reset($command) . " VALUES ";
+          $values = explode("), (", end($command));
+          // echo "\nN values: ".
+          $values_size = sizeof($values);
+          // $values = array_map("ltrin('(')", $values); // remove first parentheses
+          // $values = array_map("rtrin(')')", $values); // remove last parentheses
+          $values[0] = ltrim($values[0], "(");
+          $values[$values_size -1] = rtrim($values[$values_size -1], ")");
+          
+          // print_r($values); 
+
+          foreach ($values as $value) {
+
+            // echo "\nX: ".
+            $single_insert = $command_prefix ."(". $value .")";
+
+            try {
+
+              $this->connection->query($single_insert);
+
+            }
+            catch (\Exception $e) {
+
+              die("\n\n\t\tQuery: {$single_insert}");
+
+            }
+
+          }
+
+        }
+        else {
+
+          echo "\n\n\t\tQuery: {$insert_query}";
+
+        }
+
+        die();
 
       }
 
@@ -262,10 +324,23 @@ class insert_multiple {
   // function to set configs
   public function config($any) {
 
-    // echo "\nconfig";
+    // control if inserts are multiple or single
     if (isset($any['insert_multiple'])) $this->insert_multiple = $any['insert_multiple'];
-    if (isset($any['update_if_exists'])) $this->update_if_exists = $any['update_if_exists'];
-    if (isset($any['dont_update_if_new_is_empty'])) $this->dont_update_if_new_is_empty = $any['dont_update_if_new_is_empty'];
+
+    // control updates if exists
+    if (isset($any['update_if_exists'])) $this->update_if_exists = true;
+
+    // control fields to update
+    if (isset($any['update_if_exists']['fields_to_update'])) $this->fields_to_update = $any['update_if_exists']['fields_to_update'];
+
+    // skip update if new is empty
+    if (isset($any['update_if_exists']['skip_if_new_is_empty'])) $this->skip_if_new_is_empty = $any['update_if_exists']['skip_if_new_is_empty'];
+    
+    // skip update if already exists
+    if (isset($any['update_if_exists']['skip_if_already_exists'])) $this->skip_if_already_exists = $any['update_if_exists']['skip_if_already_exists'];
+
+    // print query
+    if (isset($any['print_query'])) $this->print_query = $any['print_query'];
     
   }
 
