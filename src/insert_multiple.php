@@ -21,6 +21,7 @@ class insert_multiple {
   public $skip_if_new_is_empty = false;
   public $skip_if_already_exists = false;
   public $print_query = false;
+  public $concat_new_values = false;
 
 
   // constructor
@@ -143,10 +144,8 @@ class insert_multiple {
     // It will be the final array, with the processed data. Each index will be a value of the Partition variable
     $inserts = [];
 
-    /*
-    FIRST STEP:
-    Split the final_array array into smaller arrays that fit in an insert
-    */
+
+    // Split the final_array array into smaller arrays that fit in an insert
     foreach ($this->final_array as $index => $array) {
 
       // Increments the current_size, with the bytes of the iterated tulpa
@@ -182,10 +181,8 @@ class insert_multiple {
 
     }
 
-    /*
-    SECOND STEP:
-    Concatenate all positions within the partition, into a single position within the partition
-    */
+
+    // Concatenate all positions within the partition, into a single position within the partition    
     foreach ($inserts as $index => $insert) {
 
       $insert = join('), (', $insert);
@@ -194,10 +191,8 @@ class insert_multiple {
     }
 
     
-    /*
-    LAST STEP:
-    Insert the data
-    */
+    
+    // Insert data
     $this->connection->begin_transaction();
 
 
@@ -215,8 +210,12 @@ class insert_multiple {
 
         foreach ($this->fields_to_update as $field) {
 
-          
-          if ($this->skip_if_already_exists) {
+          if ($this->concat_new_values) {
+
+            $updates[] = "{$field} = CONCAT({$field}, VALUES({$field}))";
+
+          }
+          elseif ($this->skip_if_already_exists) {
             
             $updates[] = "{$field} = IF({$field} IS NOT NULL AND TRIM({$field}) NOT LIKE '', {$field}, VALUES({$field}))";
 
@@ -268,23 +267,15 @@ class insert_multiple {
         
         if ($this->insert_multiple) {
 
-          // echo "\nCommand: ". $insert_query;
           $command = explode(" VALUES ", $insert_query);
-          // echo "\nPrefix: ".
           $command_prefix = reset($command) . " VALUES ";
-          $values = explode("), (", end($command));
-          // echo "\nN values: ".
+          $values = explode("), (", end($command));          
           $values_size = sizeof($values);
-          // $values = array_map("ltrin('(')", $values); // remove first parentheses
-          // $values = array_map("rtrin(')')", $values); // remove last parentheses
           $values[0] = ltrim($values[0], "(");
           $values[$values_size -1] = rtrim($values[$values_size -1], ")");
-          
-          // print_r($values); 
 
           foreach ($values as $value) {
 
-            // echo "\nX: ".
             $single_insert = $command_prefix ."(". $value .")";
 
             try {
@@ -303,11 +294,10 @@ class insert_multiple {
         }
         else {
 
-          echo "\n\n\t\tQuery: {$insert_query}";
+          die("\n\n\t\tQuery: {$insert_query}");
 
         }
 
-        die();
 
       }
 
@@ -325,22 +315,32 @@ class insert_multiple {
   public function config($any) {
 
     // control if inserts are multiple or single
-    if (isset($any['insert_multiple'])) $this->insert_multiple = $any['insert_multiple'];
+    if (isset($any['insert_multiple'])) 
+      $this->insert_multiple = $any['insert_multiple'];
 
     // control updates if exists
-    if (isset($any['update_if_exists'])) $this->update_if_exists = true;
+    if (isset($any['update_if_exists']))
+      $this->update_if_exists = true;
 
     // control fields to update
-    if (isset($any['update_if_exists']['fields_to_update'])) $this->fields_to_update = $any['update_if_exists']['fields_to_update'];
+    if (isset($any['update_if_exists']['fields_to_update']))
+      $this->fields_to_update = $any['update_if_exists']['fields_to_update'];
 
     // skip update if new is empty
-    if (isset($any['update_if_exists']['skip_if_new_is_empty'])) $this->skip_if_new_is_empty = $any['update_if_exists']['skip_if_new_is_empty'];
+    if (isset($any['update_if_exists']['skip_if_new_is_empty']))
+      $this->skip_if_new_is_empty = $any['update_if_exists']['skip_if_new_is_empty'];
     
     // skip update if already exists
-    if (isset($any['update_if_exists']['skip_if_already_exists'])) $this->skip_if_already_exists = $any['update_if_exists']['skip_if_already_exists'];
-
+    if (isset($any['update_if_exists']['skip_if_already_exists']))
+      $this->skip_if_already_exists = $any['update_if_exists']['skip_if_already_exists'];
+    
     // print query
-    if (isset($any['print_query'])) $this->print_query = $any['print_query'];
+    if (isset($any['print_query'])) 
+      $this->print_query = $any['print_query'];
+    
+    // concat new values
+    if (isset($any['update_if_exists']['concat_new_values']))
+      $this->concat_new_values = $any['update_if_exists']['concat_new_values'];
     
   }
 
@@ -352,6 +352,7 @@ class insert_multiple {
 
   }
 
+  
   // destructor
   public function __destruct() {
   
