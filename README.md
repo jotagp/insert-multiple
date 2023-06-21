@@ -201,5 +201,3 @@ echo  "]\nfinished at: ".  Date('Y-m-d H:i:s') .  "\n";
 Thanks for making it this far. I hope that this package will help you to have more performance in your day.   
 I remain at your disposal if you need assistance or have any suggestions. 
 You can contact me on [Linkedin](https://www.linkedin.com/in/jo%C3%A3o-gabriel-pereira-909085105/).
-
-asdsadasdsadsad
