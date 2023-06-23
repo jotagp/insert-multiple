@@ -1,6 +1,6 @@
 {
-    "name": "jotagp/insert-multiple",
-    "description": "A simple PHP package, to insert multiple records into a MySQL/MariaDB database.",
+    "name": "jotagp/multi-upsert",
+    "description": "A simple PHP package to insert and update multiple records into a database (MySQL/MariaDB | Postgres(comming soon) | Sql-Server(comming soon)).",
     "type": "library",
     "license": "MIT",
     "authors": [{
@@ -9,9 +9,11 @@
     }],
     "autoload": {
         "psr-4": {
-            "jotagp\\insert_multiple\\": "src/"
+            "jotagp\\multi_upsert\\": "src/"
         }
     },
     "minimum-stability": "stable",
-    "require": {}
+    "require": {
+        "php": ">= 8"
+    }
 }

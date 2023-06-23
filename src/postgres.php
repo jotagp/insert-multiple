@@ -1,10 +1,10 @@
 <?php
 
 
-namespace jotagp\insert_multiple;
+namespace jotagp\easy_upsert;
 
 
-class insert_multiple {
+class postgres {
   
 
   public $table_properties = []; // array that holds the table details
@@ -14,14 +14,14 @@ class insert_multiple {
   public $insert_multiple = true; // flag to insert_multiple. insert one record per time
   public $string_types = ['CHAR', 'VARCHAR', 'TINYTEXT', 'TEXT', 'BLOB', 'MEDIUMTEXT', 'MEDIUMBLOB', 'LONGTEXT', 'LONGBLOB', 'DATE', 'DATETIME', 'TIMESTAMP', 'TIME', 'YEAR']; // defautl string types
   public $table_pk_autoincrement = []; // fetch the increment value 
+  public $insert_size_limit = 0;
 
   // update
   public $update_if_exists = false;
   public $fields_to_update = [];
   public $skip_if_new_is_empty = false;
   public $skip_if_already_exists = false;
-  public $print_query = false;
-  public $concat_new_values = false;
+  public $concat_if_already_exists = false;
 
 
   // constructor
@@ -31,13 +31,20 @@ class insert_multiple {
     $this->connection = $connection;
     $this->table_name = $table_name;
 
+    // get the max lenth pack than mysql can insert
+    $select_lenth_pack = "SHOW VARIABLES LIKE 'max_allowed_packet'";
+    $this->connection->query($select_lenth_pack)->fetch_assoc()['Value']
+      or die("\nError: could not fetch max_allowed_packet");
+
     // get auto_increment
     $select_increment = "SHOW TABLE STATUS LIKE '{$table_name}'";
-    $this->table_pk_autoincrement = $connection->query($select_increment)->fetch_assoc()['Auto_increment'] -1 ; // because we increment +1 later
+    $this->table_pk_autoincrement = $connection->query($select_increment)->fetch_assoc()['Auto_increment'] -1 
+      or die("\nError: could not fetch table auto_increment"); // because we increment +1 later
 
     // fetch the table details from the database
     $select_metadata = "DESC {$table_name}";
-    $rows = $connection->query($select_metadata) or die("\nError: could not fetch metadata. ". $connection->errno . " - " . $connection->error);
+    $rows = $connection->query($select_metadata) 
+      or die("\nError: could not fetch table properties. ". $connection->errno . " - " . $connection->error);
     
     // checks if the data was found
     if ($rows->num_rows > 0) {
@@ -81,7 +88,7 @@ class insert_multiple {
   // function do add new value into insert
   public function push($any) {
     
-    // temporary array to store that data
+    // temporary array to store that data from any
     $new_any = [];
 
     // iterate over the table properties
@@ -91,6 +98,8 @@ class insert_multiple {
       if (isset($any[$column_name]) && strlen($any[$column_name]) > 0) {
 
         $new_any[$column_name] = addslashes($any[$column_name]);
+        // remove from any that property (u will undertand later)
+        unset($any[$column_name]);
 
       }
       else {
@@ -129,11 +138,8 @@ class insert_multiple {
   // function to run insert
   public function exec() {
 
-    // The variable insert_size_limit stores the maximum size in bytes of a transaction allowed by mysql
-    $insert_size_limit = $this->connection->query("show variables like 'max_allowed_packet'")->fetch_assoc()['Value'];
-
-    // And we subtract 10% from it, for a margin of error
-    $insert_size_limit -= ($insert_size_limit * 0.1);
+    // The variable insert_size_limit stores the maximum size in bytes of a transaction allowed by mysql, and we subtract 10% from it, for a margin of error
+    $this->insert_size_limit -= ($this->insert_size_limit * 0.1);
 
     // The variable current_size stores the value in bytes of each tuple
     $current_size = 0;
@@ -153,10 +159,10 @@ class insert_multiple {
 
       // If the insert_multiple flag is true on the function parameters, the insertion must happen one by one tuple
       $current_size = $this->insert_multiple ? $current_size : 1;
-      $insert_size_limit = $this->insert_multiple ? $insert_size_limit : 1;
+      $this->insert_size_limit = $this->insert_multiple ? $this->insert_size_limit : 1;
 
       // As long as current_size is less than or equal to insert_size_limit, we insert the tuple in the same partition, else, we insert the tuple in a new partition.
-      if ($current_size <= $insert_size_limit) {
+      if ($current_size <= $this->insert_size_limit) {
 
         $inserts[$partition][$index] = $array;
 
@@ -194,8 +200,6 @@ class insert_multiple {
     
     // Insert data
     $this->connection->begin_transaction();
-
-
     foreach ($inserts as $partition => $values) {
        
       $columns = implode(", ", array_keys($this->table_properties));
@@ -210,7 +214,7 @@ class insert_multiple {
 
         foreach ($this->fields_to_update as $field) {
 
-          if ($this->concat_new_values) {
+          if ($this->concat_if_already_exists) {
 
             $updates[] = "{$field} = CONCAT({$field}, VALUES({$field}))";
 
@@ -239,20 +243,12 @@ class insert_multiple {
 
       }
 
-      if ($this->print_query) {
-        echo "\n\n". $insert_query;
-        exit;
-      }
-
       // fix de NULL values
       if (strstr($insert_query, 'NULL') == TRUE) {
 
         $insert_query = str_replace('\'NULL\'', 'NULL', $insert_query);
 
       }
-
-      // print 
-      if ($this->print_query) {echo "\n\n\t\t". $insert_query; exit;}
 
       try {
 
@@ -269,6 +265,8 @@ class insert_multiple {
 
           $command = explode(" VALUES ", $insert_query);
           $command_prefix = reset($command) . " VALUES ";
+          $command_updates = " ON DUPLICATE KEY UPDATE ". end(explode(" ON DUPLICATE KEY UPDATE ", $insert_query));
+          $command_updates_size = strlen(end(explode(" UPDATE ", $insert_query)));
           $values = explode("), (", end($command));          
           $values_size = sizeof($values);
           $values[0] = ltrim($values[0], "(");
@@ -277,6 +275,8 @@ class insert_multiple {
           foreach ($values as $value) {
 
             $single_insert = $command_prefix ."(". $value .")";
+            if ($command_updates_size > 1) 
+              $single_insert .= $command_updates;
 
             try {
 
@@ -334,13 +334,9 @@ class insert_multiple {
     if (isset($any['update_if_exists']['skip_if_already_exists']))
       $this->skip_if_already_exists = $any['update_if_exists']['skip_if_already_exists'];
     
-    // print query
-    if (isset($any['print_query'])) 
-      $this->print_query = $any['print_query'];
-    
     // concat new values
-    if (isset($any['update_if_exists']['concat_new_values']))
-      $this->concat_new_values = $any['update_if_exists']['concat_new_values'];
+    if (isset($any['update_if_exists']['concat_if_already_exists']))
+      $this->concat_if_already_exists = $any['update_if_exists']['concat_if_already_exists'];
     
   }
 
