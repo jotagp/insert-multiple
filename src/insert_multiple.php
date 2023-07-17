@@ -212,7 +212,7 @@ class insert_multiple {
 
           if ($this->concat_new_values) {
 
-            $updates[] = "{$field} = CONCAT({$field}, VALUES({$field}))";
+            $updates[] = "{$field} = IF({$field} IS NULL, VALUES({$field}), CONCAT({$field}, VALUES({$field})))";
 
           }
           elseif ($this->skip_if_already_exists) {
